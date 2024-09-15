@@ -118,170 +118,97 @@ def create_instance(compute, project, config, zone_list):
     instances = 0
     regions_attempted = 0
     print(f"There are {len(regions_to_try)} regions to try that match the GPU type and machine type configuration.")
+
     for region in regions_to_try:
         print(f"Attempting to create instances in {region}")
         zones = [z for z in zone_list if z['region'] == region]
         print(f"There are {len(zones)} zones to try in {region}")
         zones_attempted = 0
         move_regions = 0
-        for i in range(len(zones)):
+
+        for i in range(len(zones)): 
             zone_config = zones[i]
-            for j in range(compute_config['number_of_instances']):
-                print(f"Creating instance number {instances+1} of {compute_config['number_of_instances']} in {zone_config['zone']}, zone {zones_attempted+1} out of {len(zones)} attempted.")
-                image_project = compute_config['instance_config']['image_project']
-                image_family = compute_config['instance_config']['image_family']
-                image_response = compute.images().getFromFamily(
-                    project=image_project, family=image_family).execute()
-                source_disk_image = image_response['selfLink']
-                instance_name = compute_config['instance_config']['name'] + '-' + str(instances+1) + '-' + zone_config['zone']
-                # Configure the machine
-                machine_type = f"zones/{zone_config['zone']}/machineTypes/{compute_config['instance_config']['machine_type']}"
-                # startup_script = open(
-                #     os.path.join(
-                #         os.path.dirname(__file__), 'startup-script.sh'), 'r').read()
-                # image_url = "http://storage.googleapis.com/gce-demo-input/photo.jpg"
-                # image_caption = "Ready for dessert?"
 
-                config = {
-                    'name': instance_name,
-                    'machineType': machine_type,
+        # Get the single gpu_type from config (assuming you've fixed this in gpu_config.json)
+        gpu_type = config['instance_config']['gpu_type']
 
-                    # Specify the boot disk and the image  to use as a source.
-                    'disks': [
-                        {
-                            'kind': 'compute#attachedDisk',
-                            'type': 'PERSISTENT',
-                            'boot': True,
-                            'mode': 'READ_WRITE',
-                            'autoDelete': True,
-                            'deviceName': compute_config['instance_config']['name'],
-                            'initializeParams': {
-                                'sourceImage': source_disk_image,
-                                'diskType': f"projects/{project}/zones/{zone_config['zone']}/diskTypes/{compute_config['instance_config']['disk_type']}",
-                                'diskSizeGb': compute_config['instance_config']['disk_size'],
-                                'labels': {}
-                            },
-                            "diskEncryptionKey": {}
-                        }
-                    ],
-                    'canIpForward': False,
-                    'guestAccelerators': [
-                        {
-                            'acceleratorCount': compute_config['instance_config']['number_of_gpus'],
-                            'acceleratorType': f"zones/{zone_config['zone']}/acceleratorTypes/{compute_config['instance_config']['gpu_type']}"
-                        }
-                    ],
+        # Check if there's a specific machine type for this GPU
+        machine_type = config['instance_config'].get('gpu_machine_type_mapping', {}).get(gpu_type)
+        if machine_type:
+            compute_config['instance_config']['machine_type'] = machine_type
+        else:
+            # If no specific mapping, use the default machine type
+            compute_config['instance_config']['machine_type'] = config['instance_config']['machine_type']
 
-                    'tags': {
-                        "items": compute_config['instance_config']['firewall_rules']
-                    },
+        for j in range(compute_config['number_of_instances']):
+            # ... (rest of your instance creation logic)
 
-                    # Specify a network interface with NAT to access the public
-                    # internet.
-                    'networkInterfaces': [{
-                        'kind': 'compute#networkInterface',
-                        'network': compute_config['instance_config']['network_interfaces']['network'],
-                        'accessConfigs': [
-                            {
-                                'kind': 'compute#accessConfig',
-                                'name': 'External NAT',
-                                'type': 'ONE_TO_ONE_NAT',
-                                'networkTier': 'PREMIUM'
-                            }
-                        ],
-                        'aliasIpRanges': []
-                    }
-                    ],
-                    'description': '',
-                    'labels': {},
-                    'scheduling': {
-                        'preemptible': False,
-                        'onHostMaintenance': 'TERMINATE',
-                        'automaticRestart': True,
-                        'nodeAffinities': []
-                    },
-                    'deletionProtection': False,
-                    'reservationAffinity': {
-                        'consumeReservationType': 'ANY_RESERVATION'
-                    },
-                    # Allow the instance to access cloud storage and logging.
-                    'serviceAccounts': [{
-                        'email': compute_config['instance_config']['identity_and_api_access']['service_account_email'],
-                        'scopes': [
-                            compute_config['instance_config']['identity_and_api_access']['scopes']
-                        ]
-                    }
-                    ],
-                    'shieldedInstanceConfig': {
-                        'enableSecureBoot': False,
-                        'enableVtpm': True,
-                        'enableIntegrityMonitoring': True
-                    },
-
-                    'confidentialInstanceConfig': {
-                        'enableConfidentialCompute': False
-                    },
-
-                    # Metadata is readable from the instance and allows you to
-                    # pass configuration from deployment scripts to instances.
-                    'metadata': {
-                        'kind': 'compute#metadata',
-                        'items': [],
-                    }
-                }
+            # Handle potential empty or invalid instance_name
+            instance_name = compute_config['instance_config']['name'] + '-' + str(instances + 1) + '-' + zone_config['zone']
+            if not instance_name or not instance_name.strip(): 
+                print("Error: Invalid instance name. Skipping this iteration.")
+                continue  # Skip to the next iteration
 
                 print(f"Creating instance {instance_name}.")
-                operation = compute.instances().insert(
-                    project=project,
-                    zone=zone_config['zone'],
-                    body=config).execute()
-
-                print('Waiting for operation to finish...')
-                move_zones = 0
-                while True:
-                    result = compute.zoneOperations().get(
+                try:
+                    operation = compute.instances().insert(
                         project=project,
                         zone=zone_config['zone'],
-                        operation=operation['name']).execute()
+                        body=config).execute()
 
-                    if result['status'] == 'DONE':
-                        print("done.")
-                        if 'error' in result:
-                            error_results = result['error']['errors']
-                            if error_results[0]['code'] in ('QUOTA_EXCEEDED', 'ZONE_RESOURCE_POOL_EXHAUSTED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS'):
-                                move_regions = 1
-                                print(Exception(result['error']))
-                            else:
+                    print('Waiting for operation to finish...') 
+
+                    while True:
+                        result = compute.zoneOperations().get(
+                            project=project,
+                            zone=zone_config['zone'],
+                            operation=operation['name']).execute()
+
+                        if result['status'] == 'DONE':
+                            print("done.")
+                            if 'error' in result: 
+
                                 raise Exception(result['error'])
-                        else:
-                            instances += 1
-                            move_regions = 0
-                            print(f"Success: {instance_name} created")
-                            print(f"{instances} created, {compute_config['number_of_instances']-instances} more to create")
-                            instance_details = {
-                                "name": instance_name,
-                                "zone": zone_config['zone']
-                            }
-                            created_instances.append(instance_details)
-                        break
+                            else:
+                                instances += 1
+                                move_regions = 0
+                                print(f"Success: {instance_name} created")
+                                print(f"{instances} created, {compute_config['number_of_instances'] - instances} more to create")
+                                instance_details = {
+                                    "name": instance_name,
+                                    "zone": zone_config['zone']
+                                }
+                                created_instances.append(instance_details)
+                                break 
+  # Exit the inner loop if instance creation is successful
+
+                except googleapiclient.errors.HttpError as e:
+                    if e.resp.status == 403:
+                        print(f"Error creating instance: {e}")
+                        if "Quota exceeded" in str(e):
+                            move_regions = 1
+                            print(f"Quota exceeded in region {region}, moving to next region")
+                            break  # Exit the inner loop and move to the next region
+                    else:
+                        raise e  # Re-raise other HttpErrors
+
                 if instances >= compute_config['number_of_instances']:
                     print(f"Reached the desired number of instances")
                     break
                 elif move_regions == 1:
                     print(f"Quota exceeded in region {region}, moving to next region")
                     break
-            if instances >= compute_config['number_of_instances']:
-                break
-            elif move_regions == 1:
-                break
-            zones_attempted += 1
+                zones_attempted += 1
+
         regions_attempted += 1
         if instances >= compute_config['number_of_instances']:
             break
         elif regions_attempted >= len(regions_to_try):
             print(f"All regions attempted, there are not enough resources to create the desired {compute_config['number_of_instances']} instances, {instances} created")
             break
-    return(created_instances)
+
+    return created_instances
+
     time.sleep(1)
 
 def delete_instance(compute, project, instance_details):
@@ -322,7 +249,7 @@ def create_instance_test(compute, project, config, zone, requested_gpus):
                 for accelerator in response['items']:
                     print(accelerator)
 
-
+ 
 def main(gpu_config, wait=True):
     compute = googleapiclient.discovery.build('compute', 'v1')
     if gpu_config["instance_config"]["zone"]:

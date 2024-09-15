@@ -1,4 +1,4 @@
-# GPU Finder
+# GCP GPU Finder
 
 GPU Finder attempts to make it easier to find and provision Compute Engine Instances with GPUs.
 
