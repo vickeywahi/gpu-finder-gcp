@@ -116,3 +116,9 @@ pip install -r requirements.txt
 
 ## Clean Up
 There is a `delete_instance` function in the script that will delete the instances passed in the `instance_details` parameter. Please be mindful of cleaning up instances with GPUs attached when these are no longer needed.
+
+## Acknowledgements
+
+This project is based on the `gpu-finder` script by doitintl: [https://github.com/doitintl/gpu-finder](https://github.com/doitintl/gpu-finder)
+
+Many thanks to the contributors for their valuable work!
